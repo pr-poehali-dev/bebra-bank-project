@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "GET accounts",
+      "method": "GET",
+      "path": "/?user_id=1",
+      "queryStringParameters": {"user_id": "1"},
+      "expectedStatus": 404,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET profile",
+      "method": "GET",
+      "path": "/profile?user_id=1",
+      "queryStringParameters": {"user_id": "1"},
+      "expectedStatus": 200,
+      "expectedBody": {"name": "Aleksej Petrov"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

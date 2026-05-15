@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "GET stats with admin key",
+      "method": "GET",
+      "path": "/stats?key=bebrabank-admin-2026",
+      "queryStringParameters": {"key": "bebrabank-admin-2026"},
+      "expectedStatus": 200,
+      "expectedBody": {"totalUsers": 2},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET stats without key - unauthorized",
+      "method": "GET",
+      "path": "/stats",
+      "expectedStatus": 401,
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
+import { api } from "@/lib/api";
 
 type Page = "dashboard" | "accounts" | "transfers" | "cards" | "history" | "notifications" | "settings";
 
@@ -61,36 +62,12 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
   );
 }
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const initialAccounts = [
-  { id: "1", name: "Основной счёт", number: "•••• 4521", fullNumber: "4081 7810 0001 4521", balance: 284750, currency: "₽", color: "#00e5ff", change: +12.4 },
-  { id: "2", name: "Накопительный", number: "•••• 8834", fullNumber: "4081 7810 0008 8834", balance: 1250000, currency: "₽", color: "#a855f7", change: +5.1 },
-  { id: "3", name: "Долларовый", number: "•••• 2219", fullNumber: "4081 7810 0002 2219", balance: 3480, currency: "$", color: "#00ff88", change: -1.2 },
-];
-
-const initialCards = [
-  { id: "1", number: "•••• •••• •••• 4521", fullNumber: "4521 8800 1234 4521", holder: "ALEKSEI PETROV", expires: "12/27", type: "VISA", balance: 284750, color: "from-cyan-500 to-blue-600", locked: false },
-  { id: "2", number: "•••• •••• •••• 8834", fullNumber: "5334 9900 5678 8834", holder: "ALEKSEI PETROV", expires: "08/26", type: "MasterCard", balance: 156300, color: "from-purple-500 to-pink-600", locked: false },
-];
-
-const mockTransactions = [
-  { id: "1", title: "Супермаркет Лента", category: "Продукты", amount: -3240, date: "Сег., 14:32", icon: "ShoppingCart", color: "#00e5ff" },
-  { id: "2", title: "Перевод от Марии К.", category: "Входящий", amount: +25000, date: "Сег., 11:15", icon: "ArrowDownLeft", color: "#00ff88" },
-  { id: "3", title: "Netflix", category: "Подписки", amount: -890, date: "Вчера, 23:00", icon: "Play", color: "#a855f7" },
-  { id: "4", title: "Такси Яндекс", category: "Транспорт", amount: -540, date: "Вчера, 18:44", icon: "Car", color: "#ff2d78" },
-  { id: "5", title: "Зарплата", category: "Доход", amount: +180000, date: "13 мая", icon: "Briefcase", color: "#00ff88" },
-  { id: "6", title: "Аренда квартиры", category: "ЖКХ", amount: -45000, date: "10 мая", icon: "Home", color: "#f59e0b" },
-  { id: "7", title: "DNS Техника", category: "Электроника", amount: -12990, date: "8 мая", icon: "Laptop", color: "#00e5ff" },
-  { id: "8", title: "Кофейня Surf", category: "Кафе", amount: -480, date: "7 мая", icon: "Coffee", color: "#f59e0b" },
-];
-
-const initialNotifications = [
-  { id: "1", title: "Перевод получен", text: "Мария К. перевела вам 25 000 ₽", time: "14 мин назад", type: "success", read: false },
-  { id: "2", title: "Подозрительная операция", text: "Попытка входа с нового устройства заблокирована", time: "2 ч назад", type: "warning", read: false },
-  { id: "3", title: "Кэшбэк начислен", text: "Вам начислено 640 ₽ кэшбэка за май", time: "5 ч назад", type: "info", read: true },
-  { id: "4", title: "Платёж выполнен", text: "Netflix — 890 ₽ успешно списано", time: "Вчера", type: "info", read: true },
-  { id: "5", title: "Ставка изменена", text: "Ставка по накопительному счёту: 18% годовых", time: "2 дня назад", type: "success", read: true },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Account = { id: string; name: string; number: string; fullNumber?: string; balance: number; currency: string; color: string; change: number };
+type Card = { id: string; number: string; fullNumber: string; holder: string; expires: string; type: string; balance: number; color: string; locked: boolean };
+type Transaction = { id: string; title: string; category: string; amount: number; icon: string; color: string; date: string };
+type Notification = { id: string; title: string; text: string; time: string; type: string; read: boolean };
+type Profile = { id: number; name: string; email: string; phone: string; role: string; plan: string; sinceYear: number; isVerified: boolean };
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Index() {
@@ -99,11 +76,41 @@ export default function Index() {
   const [transferPhone, setTransferPhone] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [transferComment, setTransferComment] = useState("");
-  const [notifications, setNotifications] = useState(initialNotifications);
-  const [accounts, setAccounts] = useState(initialAccounts);
-  const [cards, setCards] = useState(initialCards);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const [qrMode, setQrMode] = useState(false);
-  const [transactions, setTransactions] = useState(mockTransactions);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [onlineStatus, setOnlineStatus] = useState<"loading" | "online" | "offline">("loading");
+
+  // ── Load all data from API on mount ──────────────────────────────────────
+  const loadAll = useCallback(async () => {
+    setOnlineStatus("loading");
+    try {
+      const [accs, cds, txs, notifs, prof] = await Promise.all([
+        api.getAccounts(),
+        api.getCards(),
+        api.getTransactions(),
+        api.getNotifications(),
+        api.getProfile(),
+      ]);
+      setAccounts(accs.map((a: Account & { number: string; currency: string }) => ({
+        ...a,
+        id: String(a.id),
+        currency: a.currency === "RUB" ? "₽" : a.currency === "USD" ? "$" : a.currency,
+      })));
+      setCards(cds.map((c: Card) => ({ ...c, id: String(c.id) })));
+      setTransactions(txs.map((t: Transaction) => ({ ...t, id: String(t.id) })));
+      setNotifications(notifs.map((n: Notification) => ({ ...n, id: String(n.id) })));
+      setProfile(prof);
+      setOnlineStatus("online");
+    } catch {
+      setOnlineStatus("offline");
+    }
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -117,28 +124,17 @@ export default function Index() {
     { id: "settings", icon: "Settings", label: "Настройки" },
   ];
 
-  const handleTransferDone = (phone: string, amount: string) => {
-    const num = Number(amount);
-    setAccounts((prev) => prev.map((a) => a.id === "1" ? { ...a, balance: a.balance - num } : a));
-    const newTx = {
-      id: String(Date.now()),
-      title: `Перевод: ${phone}`,
-      category: "Перевод",
-      amount: -num,
-      date: "Только что",
-      icon: "Send",
-      color: "#00e5ff",
-    };
-    setTransactions((prev) => [newTx, ...prev]);
-    const newNotif = {
-      id: String(Date.now()),
-      title: "Перевод отправлен",
-      text: `${formatMoney(num)} на ${phone}`,
-      time: "Только что",
-      type: "success" as const,
-      read: false,
-    };
-    setNotifications((prev) => [newNotif, ...prev]);
+  const handleTransferDone = async (phone: string, amount: string) => {
+    try {
+      const result = await api.transfer(phone, Number(amount), transferComment);
+      setTransactions((prev) => [result, ...prev]);
+      setAccounts((prev) => prev.map((a) => a.id === "1" ? { ...a, balance: a.balance - Number(amount) } : a));
+      // Reload notifications to pick up the new one from server
+      const notifs = await api.getNotifications();
+      setNotifications(notifs.map((n: Notification) => ({ ...n, id: String(n.id) })));
+    } catch (e: unknown) {
+      toast.error("Ошибка перевода: " + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   return (
@@ -158,7 +154,10 @@ export default function Index() {
               </div>
               <div>
                 <div className="font-black text-sm tracking-widest gradient-text">БЕБРА_bank</div>
-                <div className="text-[10px] text-white/30 font-mono tracking-wider">v2.0 QUANTUM</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${onlineStatus === "online" ? "bg-green-400" : onlineStatus === "loading" ? "bg-yellow-400 animate-pulse" : "bg-red-400"}`} />
+                  <span className="text-[9px] text-white/30 font-mono">{onlineStatus === "online" ? "online" : onlineStatus === "loading" ? "sync..." : "offline"}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -186,13 +185,15 @@ export default function Index() {
           </nav>
 
           <button
-            onClick={() => { setActivePage("settings"); toast.info("Открыт профиль"); }}
+            onClick={() => { setActivePage("settings"); }}
             className="glass rounded-xl p-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left w-full"
           >
-            <div className="w-9 h-9 gradient-primary rounded-lg flex items-center justify-center text-[#070b12] font-bold text-sm shrink-0">АП</div>
+            <div className="w-9 h-9 gradient-primary rounded-lg flex items-center justify-center text-[#070b12] font-bold text-sm shrink-0">
+              {profile ? profile.name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase() : "АП"}
+            </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-white/90 truncate">Алексей П.</div>
-              <div className="text-xs text-white/40 font-mono">Premium</div>
+              <div className="text-sm font-semibold text-white/90 truncate">{profile?.name?.split(" ").slice(0,2).join(" ") ?? "Загрузка..."}</div>
+              <div className="text-xs text-white/40 font-mono">{profile?.plan ?? "Premium"}</div>
             </div>
             <Icon name="ChevronRight" size={16} className="text-white/30 ml-auto shrink-0" />
           </button>
@@ -218,35 +219,60 @@ export default function Index() {
           </header>
 
           <div className="flex-1 overflow-y-auto p-4 md:p-8">
-            {activePage === "dashboard" && (
-              <DashboardPage accounts={accounts} transactions={transactions} setActivePage={setActivePage} />
+            {onlineStatus === "loading" && accounts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-4">
+                <div className="w-10 h-10 border-2 border-cyan-500/30 border-t-[#00e5ff] rounded-full animate-spin" />
+                <p className="text-white/30 text-sm font-mono">Синхронизация с сервером...</p>
+              </div>
+            ) : (
+              <>
+                {activePage === "dashboard" && (
+                  <DashboardPage accounts={accounts} transactions={transactions} setActivePage={setActivePage} />
+                )}
+                {activePage === "accounts" && (
+                  <AccountsPage accounts={accounts} setAccounts={setAccounts} setActivePage={setActivePage} />
+                )}
+                {activePage === "transfers" && (
+                  <TransfersPage
+                    step={transferStep} setStep={setTransferStep}
+                    phone={transferPhone} setPhone={setTransferPhone}
+                    amount={transferAmount} setAmount={setTransferAmount}
+                    comment={transferComment} setComment={setTransferComment}
+                    qrMode={qrMode} setQrMode={setQrMode}
+                    onDone={handleTransferDone}
+                  />
+                )}
+                {activePage === "cards" && (
+                  <CardsPage cards={cards} setCards={setCards} />
+                )}
+                {activePage === "history" && <HistoryPage transactions={transactions} />}
+                {activePage === "notifications" && (
+                  <NotificationsPage
+                    notifications={notifications}
+                    onRead={async (id) => {
+                      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+                      await api.markRead(id);
+                    }}
+                    onReadAll={async () => {
+                      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+                      await api.markRead(undefined, true);
+                      toast.success("Все уведомления прочитаны");
+                    }}
+                    onDelete={async (id) => {
+                      setNotifications((prev) => prev.filter((n) => n.id !== id));
+                      await api.deleteNotification(id);
+                      toast.info("Уведомление удалено");
+                    }}
+                  />
+                )}
+                {activePage === "settings" && <SettingsPage profile={profile} onProfileUpdate={async (data) => {
+                  await api.updateProfile(data);
+                  if (data.name) setProfile((p) => p ? { ...p, name: data.name! } : p);
+                  if (data.email) setProfile((p) => p ? { ...p, email: data.email! } : p);
+                  toast.success("Профиль сохранён");
+                }} />}
+              </>
             )}
-            {activePage === "accounts" && (
-              <AccountsPage accounts={accounts} setAccounts={setAccounts} setActivePage={setActivePage} />
-            )}
-            {activePage === "transfers" && (
-              <TransfersPage
-                step={transferStep} setStep={setTransferStep}
-                phone={transferPhone} setPhone={setTransferPhone}
-                amount={transferAmount} setAmount={setTransferAmount}
-                comment={transferComment} setComment={setTransferComment}
-                qrMode={qrMode} setQrMode={setQrMode}
-                onDone={handleTransferDone}
-              />
-            )}
-            {activePage === "cards" && (
-              <CardsPage cards={cards} setCards={setCards} />
-            )}
-            {activePage === "history" && <HistoryPage transactions={transactions} />}
-            {activePage === "notifications" && (
-              <NotificationsPage
-                notifications={notifications}
-                onRead={(id) => setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n))}
-                onReadAll={() => { setNotifications((prev) => prev.map((n) => ({ ...n, read: true }))); toast.success("Все уведомления прочитаны"); }}
-                onDelete={(id) => { setNotifications((prev) => prev.filter((n) => n.id !== id)); toast.info("Уведомление удалено"); }}
-              />
-            )}
-            {activePage === "settings" && <SettingsPage />}
           </div>
 
           <nav className="md:hidden glass border-t border-white/5 flex shrink-0">
@@ -274,8 +300,8 @@ export default function Index() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage({ accounts, transactions, setActivePage }: {
-  accounts: typeof initialAccounts;
-  transactions: typeof mockTransactions;
+  accounts: Account[];
+  transactions: Transaction[];
   setActivePage: (p: Page) => void;
 }) {
   const totalBalance = accounts.reduce((sum, a) => sum + (a.currency === "₽" ? a.balance : a.balance * 90), 0);
@@ -388,8 +414,8 @@ function DashboardPage({ accounts, transactions, setActivePage }: {
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 function AccountsPage({ accounts, setAccounts, setActivePage }: {
-  accounts: typeof initialAccounts;
-  setAccounts: React.Dispatch<React.SetStateAction<typeof initialAccounts>>;
+  accounts: Account[];
+  setAccounts: React.Dispatch<React.SetStateAction<Account[]>>;
   setActivePage: (p: Page) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -425,9 +451,14 @@ function AccountsPage({ accounts, setAccounts, setActivePage }: {
             </div>
             <button
               disabled={!topupAmount || Number(topupAmount) <= 0}
-              onClick={() => {
-                setAccounts((prev) => prev.map((a) => a.id === showTopup ? { ...a, balance: a.balance + Number(topupAmount) } : a));
-                toast.success(`Счёт пополнен на ${formatMoney(Number(topupAmount))}`);
+              onClick={async () => {
+                try {
+                  const res = await api.topupAccount(Number(showTopup), Number(topupAmount));
+                  setAccounts((prev) => prev.map((a) => a.id === showTopup ? { ...a, balance: res.balance } : a));
+                  toast.success(`Счёт пополнен на ${formatMoney(Number(topupAmount))}`);
+                } catch {
+                  toast.error("Ошибка пополнения");
+                }
                 setShowTopup(null); setTopupAmount("");
               }}
               className="w-full gradient-primary text-[#070b12] font-bold py-3 rounded-xl neon-glow-cyan disabled:opacity-30 disabled:cursor-not-allowed text-sm"
@@ -481,20 +512,14 @@ function AccountsPage({ accounts, setAccounts, setActivePage }: {
             </div>
             <button
               disabled={!newAccName.trim()}
-              onClick={() => {
-                const colors = ["#f59e0b", "#ff2d78", "#00e5ff"];
-                const newAcc = {
-                  id: String(Date.now()),
-                  name: newAccName.trim(),
-                  number: `•••• ${Math.floor(1000 + Math.random() * 9000)}`,
-                  fullNumber: `4081 7810 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`,
-                  balance: 0,
-                  currency: "₽",
-                  color: colors[Math.floor(Math.random() * colors.length)],
-                  change: 0,
-                };
-                setAccounts((prev) => [...prev, newAcc]);
-                toast.success(`Счёт «${newAccName}» открыт!`);
+              onClick={async () => {
+                try {
+                  const newAcc = await api.createAccount(newAccName.trim());
+                  setAccounts((prev) => [...prev, { ...newAcc, id: String(newAcc.id), currency: "₽", change: 0 }]);
+                  toast.success(`Счёт «${newAccName}» открыт!`);
+                } catch {
+                  toast.error("Ошибка создания счёта");
+                }
                 setShowNewAccount(false); setNewAccName("");
               }}
               className="w-full gradient-primary text-[#070b12] font-bold py-3 rounded-xl neon-glow-cyan disabled:opacity-30 disabled:cursor-not-allowed text-sm"
@@ -783,19 +808,25 @@ function TransfersPage({ step, setStep, phone, setPhone, amount, setAmount, comm
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 function CardsPage({ cards, setCards }: {
-  cards: typeof initialCards;
-  setCards: React.Dispatch<React.SetStateAction<typeof initialCards>>;
+  cards: Card[];
+  setCards: React.Dispatch<React.SetStateAction<Card[]>>;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showCvv, setShowCvv] = useState<string | null>(null);
   const [showNewCard, setShowNewCard] = useState(false);
   const [confirmLock, setConfirmLock] = useState<string | null>(null);
 
-  const lockCard = (id: string) => {
+  const lockCard = async (id: string) => {
     const card = cards.find((c) => c.id === id);
     if (!card) return;
-    setCards((prev) => prev.map((c) => c.id === id ? { ...c, locked: !c.locked } : c));
-    toast.success(card.locked ? "Карта разблокирована" : "Карта заблокирована");
+    const newLocked = !card.locked;
+    try {
+      await api.lockCard(Number(id), newLocked);
+      setCards((prev) => prev.map((c) => c.id === id ? { ...c, locked: newLocked } : c));
+      toast.success(newLocked ? "Карта заблокирована" : "Карта разблокирована");
+    } catch {
+      toast.error("Ошибка изменения статуса карты");
+    }
     setConfirmLock(null);
   };
 
@@ -843,7 +874,16 @@ function CardsPage({ cards, setCards }: {
               { type: "Физическая", desc: "Пластиковая карта, доставка 3-5 дней", icon: "CreditCard" },
             ].map((opt) => (
               <button key={opt.type}
-                onClick={() => { toast.success(`Заявка на ${opt.type.toLowerCase()} карту отправлена`); setShowNewCard(false); }}
+                onClick={async () => {
+                  try {
+                    const newCard = await api.createCard("VISA");
+                    setCards((prev) => [...prev, { ...newCard, id: String(newCard.id) }]);
+                    toast.success(`${opt.type} карта выпущена!`);
+                  } catch {
+                    toast.success(`Заявка на ${opt.type.toLowerCase()} карту отправлена`);
+                  }
+                  setShowNewCard(false);
+                }}
                 className="w-full glass rounded-xl p-4 flex items-center gap-4 hover:bg-white/5 transition-colors border border-white/8 text-left group">
                 <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center group-hover:bg-cyan-500/20 transition-colors">
                   <Icon name={opt.icon} size={18} className="text-[#00e5ff]" />
@@ -932,7 +972,7 @@ function CardsPage({ cards, setCards }: {
 }
 
 // ─── History ──────────────────────────────────────────────────────────────────
-function HistoryPage({ transactions }: { transactions: typeof mockTransactions }) {
+function HistoryPage({ transactions }: { transactions: Transaction[] }) {
   const [filter, setFilter] = useState("all");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const filters = [{ id: "all", label: "Все" }, { id: "income", label: "Доходы" }, { id: "expense", label: "Расходы" }];
@@ -995,7 +1035,7 @@ function HistoryPage({ transactions }: { transactions: typeof mockTransactions }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 function NotificationsPage({ notifications, onRead, onReadAll, onDelete }: {
-  notifications: typeof initialNotifications;
+  notifications: Notification[];
   onRead: (id: string) => void;
   onReadAll: () => void;
   onDelete: (id: string) => void;
@@ -1059,20 +1099,27 @@ function NotificationsPage({ notifications, onRead, onReadAll, onDelete }: {
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
-function SettingsPage() {
+function SettingsPage({ profile, onProfileUpdate }: {
+  profile: Profile | null;
+  onProfileUpdate: (data: { name?: string; email?: string }) => Promise<void>;
+}) {
   const [twoFa, setTwoFa] = useState(true);
   const [pushNotifs, setPushNotifs] = useState(true);
   const [biometry, setBiometry] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [name, setName] = useState("Алексей Петров");
-  const [email, setEmail] = useState("a.petrov@mail.ru");
+  const name = profile?.name ?? "Загрузка...";
+  const email = profile?.email ?? "";
   const [editName, setEditName] = useState(name);
   const [editEmail, setEditEmail] = useState(email);
   const [showLogout, setShowLogout] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+
+  useEffect(() => {
+    if (profile) { setEditName(profile.name); setEditEmail(profile.email); }
+  }, [profile]);
 
   const sections = [
     {
@@ -1117,7 +1164,10 @@ function SettingsPage() {
               <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)}
                 className="bg-transparent text-white text-lg font-medium w-full outline-none" />
             </div>
-            <button onClick={() => { setName(editName); setEmail(editEmail); toast.success("Данные сохранены"); setShowProfile(false); }}
+            <button onClick={async () => {
+                await onProfileUpdate({ name: editName, email: editEmail });
+                setShowProfile(false);
+              }}
               className="w-full gradient-primary text-[#070b12] font-bold py-3 rounded-xl neon-glow-cyan text-sm">
               Сохранить
             </button>
@@ -1194,14 +1244,16 @@ function SettingsPage() {
 
       <div className="glass rounded-2xl p-5 flex items-center gap-4 border border-white/8">
         <div className="w-16 h-16 gradient-primary rounded-2xl flex items-center justify-center text-[#070b12] text-xl font-black neon-glow-cyan">
-          АП
+          {name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase()}
         </div>
         <div>
           <div className="text-lg font-bold text-white">{name}</div>
-          <div className="text-sm text-white/40">Premium клиент с 2022</div>
+          <div className="text-sm text-white/40">{profile?.plan ?? "Premium"} · с {profile?.sinceYear ?? 2022}</div>
           <div className="flex items-center gap-1 mt-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-            <span className="text-xs text-green-400">Аккаунт верифицирован</span>
+            <div className={`w-1.5 h-1.5 rounded-full ${profile?.isVerified ? "bg-green-400" : "bg-yellow-400"}`} />
+            <span className={`text-xs ${profile?.isVerified ? "text-green-400" : "text-yellow-400"}`}>
+              {profile?.isVerified ? "Аккаунт верифицирован" : "Требуется верификация"}
+            </span>
           </div>
         </div>
       </div>
@@ -1234,6 +1286,14 @@ function SettingsPage() {
           </div>
         </div>
       ))}
+
+      {profile?.role === "admin" && (
+        <a href="/admin"
+          className="w-full glass rounded-xl p-3.5 text-sm font-medium text-[#00e5ff] hover:bg-cyan-500/10 transition-colors border border-cyan-500/20 flex items-center justify-center gap-2">
+          <Icon name="Shield" size={16} />
+          Панель администратора
+        </a>
+      )}
 
       <button onClick={() => setShowLogout(true)}
         className="w-full glass rounded-xl p-3.5 text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors border border-red-500/15 flex items-center justify-center gap-2">
