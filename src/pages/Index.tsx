@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import Receipt, { type ReceiptData } from "@/components/Receipt";
 
 type Page = "dashboard" | "accounts" | "transfers" | "cards" | "history" | "notifications" | "settings";
 
@@ -278,39 +279,11 @@ function DashboardPage({ accounts, transactions, setActivePage }: {
   setActivePage: (p: Page) => void;
 }) {
   const totalBalance = accounts.reduce((sum, a) => sum + (a.currency === "₽" ? a.balance : a.balance * 90), 0);
-  const [txDetail, setTxDetail] = useState<(typeof mockTransactions)[0] | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {txDetail && (
-        <Modal title="Детали операции" onClose={() => setTxDetail(null)}>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: `${txDetail.color}20` }}>
-                <Icon name={txDetail.icon} size={22} style={{ color: txDetail.color }} />
-              </div>
-              <div>
-                <div className="font-semibold text-white">{txDetail.title}</div>
-                <div className="text-sm text-white/40">{txDetail.category} · {txDetail.date}</div>
-              </div>
-            </div>
-            {[
-              ["Сумма", <span className={`font-bold font-mono ${txDetail.amount > 0 ? "text-green-400" : "text-white"}`}>{txDetail.amount > 0 ? "+" : ""}{formatMoney(Math.abs(txDetail.amount))}</span>],
-              ["Статус", <span className="text-green-400 text-sm">Выполнено</span>],
-              ["Счёт", <span className="text-white/70 text-sm font-mono">•••• 4521</span>],
-              ["ID операции", <span className="text-white/40 text-xs font-mono">TXN{txDetail.id.padStart(10, "0")}</span>],
-            ].map(([label, value]) => (
-              <div key={String(label)} className="flex justify-between items-center py-2 border-b border-white/5">
-                <span className="text-sm text-white/50">{label}</span>
-                {value}
-              </div>
-            ))}
-            <button onClick={() => { toast.info("Квитанция сохранена в PDF"); setTxDetail(null); }} className="w-full gradient-primary text-[#070b12] font-bold py-3 rounded-xl mt-2 text-sm neon-glow-cyan">
-              Скачать квитанцию
-            </button>
-          </div>
-        </Modal>
-      )}
+      {receipt && <Receipt data={receipt} onClose={() => setReceipt(null)} />}
 
       <div>
         <p className="text-white/40 text-sm mb-1">Добро пожаловать,</p>
@@ -392,7 +365,7 @@ function DashboardPage({ accounts, transactions, setActivePage }: {
           {transactions.slice(0, 5).map((tx, i) => (
             <button
               key={tx.id}
-              onClick={() => setTxDetail(tx)}
+              onClick={() => setReceipt({ ...tx })}
               className={`flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors w-full text-left ${i < 4 ? "border-b border-white/5" : ""}`}
             >
               <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${tx.color}15` }}>
@@ -606,6 +579,8 @@ function TransfersPage({ step, setStep, phone, setPhone, amount, setAmount, comm
   qrMode: boolean; setQrMode: (v: boolean) => void;
   onDone: (phone: string, amount: string) => void;
 }) {
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+
   const contacts = [
     { name: "Мария К.", phone: "+7 916 234-56-78", initials: "МК", color: "#a855f7" },
     { name: "Сергей В.", phone: "+7 903 876-54-32", initials: "СВ", color: "#00e5ff" },
@@ -614,8 +589,21 @@ function TransfersPage({ step, setStep, phone, setPhone, amount, setAmount, comm
   ];
 
   if (step === "done") {
+    const receiptData: ReceiptData = {
+      id: String(Date.now()),
+      title: `Перевод: ${phone}`,
+      category: "Перевод",
+      amount: -Number(amount),
+      date: "Только что",
+      icon: "Send",
+      color: "#00e5ff",
+      to: phone,
+      account: "•••• 4521",
+      ...(comment ? { from: comment } : {}),
+    };
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 animate-fade-in">
+        {receipt && <Receipt data={receipt} onClose={() => setReceipt(null)} />}
         <div className="w-24 h-24 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center">
           <Icon name="CheckCircle" size={48} className="text-green-400" />
         </div>
@@ -631,9 +619,10 @@ function TransfersPage({ step, setStep, phone, setPhone, amount, setAmount, comm
             Новый перевод
           </button>
           <button
-            onClick={() => toast.info("Квитанция сохранена")}
-            className="glass border border-white/10 text-white/70 font-medium px-6 py-3 rounded-xl hover:bg-white/5 transition-colors"
+            onClick={() => setReceipt(receiptData)}
+            className="glass border border-white/10 text-white/70 font-medium px-6 py-3 rounded-xl hover:bg-white/5 transition-colors flex items-center gap-2"
           >
+            <Icon name="FileText" size={15} />
             Квитанция
           </button>
         </div>
@@ -945,7 +934,7 @@ function CardsPage({ cards, setCards }: {
 // ─── History ──────────────────────────────────────────────────────────────────
 function HistoryPage({ transactions }: { transactions: typeof mockTransactions }) {
   const [filter, setFilter] = useState("all");
-  const [txDetail, setTxDetail] = useState<(typeof mockTransactions)[0] | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const filters = [{ id: "all", label: "Все" }, { id: "income", label: "Доходы" }, { id: "expense", label: "Расходы" }];
   const filtered = transactions.filter((tx) =>
     filter === "all" ? true : filter === "income" ? tx.amount > 0 : tx.amount < 0
@@ -953,36 +942,7 @@ function HistoryPage({ transactions }: { transactions: typeof mockTransactions }
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {txDetail && (
-        <Modal title="Детали операции" onClose={() => setTxDetail(null)}>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: `${txDetail.color}20` }}>
-                <Icon name={txDetail.icon} size={22} style={{ color: txDetail.color }} />
-              </div>
-              <div>
-                <div className="font-semibold text-white">{txDetail.title}</div>
-                <div className="text-sm text-white/40">{txDetail.category} · {txDetail.date}</div>
-              </div>
-            </div>
-            {[
-              ["Сумма", <span className={`font-bold font-mono ${txDetail.amount > 0 ? "text-green-400" : "text-white"}`}>{txDetail.amount > 0 ? "+" : ""}{formatMoney(Math.abs(txDetail.amount))}</span>],
-              ["Статус", <span className="text-green-400 text-sm">Выполнено</span>],
-              ["Счёт", <span className="text-white/70 text-sm font-mono">•••• 4521</span>],
-              ["ID", <span className="text-white/40 text-xs font-mono">TXN{txDetail.id.padStart(10, "0")}</span>],
-            ].map(([label, value]) => (
-              <div key={String(label)} className="flex justify-between items-center py-2 border-b border-white/5">
-                <span className="text-sm text-white/50">{label}</span>
-                {value}
-              </div>
-            ))}
-            <button onClick={() => { toast.info("Квитанция сохранена"); setTxDetail(null); }}
-              className="w-full gradient-primary text-[#070b12] font-bold py-3 rounded-xl mt-2 text-sm neon-glow-cyan">
-              Скачать квитанцию
-            </button>
-          </div>
-        </Modal>
-      )}
+      {receipt && <Receipt data={receipt} onClose={() => setReceipt(null)} />}
 
       <div>
         <h1 className="text-2xl font-bold text-white mb-1">История</h1>
@@ -1011,7 +971,7 @@ function HistoryPage({ transactions }: { transactions: typeof mockTransactions }
 
       <div className="glass rounded-2xl overflow-hidden border border-white/5">
         {filtered.map((tx, i) => (
-          <button key={tx.id} onClick={() => setTxDetail(tx)}
+          <button key={tx.id} onClick={() => setReceipt({ ...tx })}
             className={`flex items-center gap-4 px-4 py-3.5 hover:bg-white/5 transition-colors cursor-pointer w-full text-left ${i < filtered.length - 1 ? "border-b border-white/5" : ""}`}>
             <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${tx.color}15` }}>
               <Icon name={tx.icon} size={18} style={{ color: tx.color }} />
